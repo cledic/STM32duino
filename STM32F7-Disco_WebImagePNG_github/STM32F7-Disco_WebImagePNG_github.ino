@@ -263,14 +263,14 @@ void loop()
 
     Serial.printf("idx: %d, ln: %d\r\n", idx, ln);
     
+    const char *img = readHttp.c_str();
+
     /*
      * I send the HEX stream received to the console and use this site to save it as a file:
      * https://tomeko.net/online_tools/hex_to_file.php?lang=en
      * 
      * The file saved is a good .PNG file, as expected.
-     */
-    const char *img = readHttp.c_str();
-         
+     */         
     Serial.printf("\n");
     for( int i=0; i<ln; i++)
     {

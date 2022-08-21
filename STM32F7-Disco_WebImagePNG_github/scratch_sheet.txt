@@ -1,0 +1,75 @@
+// *************************************************************************************
+STM32duino LTDC branch      ver 1.9.0
+STM32duino_STM32Ethernet    ver 1.3.0
+EthernetWebServer_SSL_STM32 ver 1.6.0
+Ethernet_Generic            ver 2.4.0
+STM32duino_LwIP             ver 2.1.2
+STM32duino_STM32SD          ver 1.2.3
+Arduino_CMSIS-DSP           ver 5.7.0
+// *************************************************************************************
+
+
+// *************************************************************************************
+Console output when the "png.open" is commented out and all is working:
+
+Init Display!
+
+Start WebClient_SSL on DISCO_F746NG with LAN8742A Ethernet & STM32Ethernet Library
+EthernetWebServer_SSL_STM32 v1.6.0
+Connecting... Connected! IP address: 192.168.1.34
+Connecting to : www.ilmeteo.it, port : 443
+Connected to www.ilmeteo.it
+Took: 377
+Initializing SD card...SD Initialization done!
+(EthernetSSLClient)(SSL_WARN)(connected): Socket was dropped unexpectedly (this can be an alternative to closing the connection)
+
+Disconnecting.
+Received 20536 bytes in 0.9043 s, rate = 22.71 kbytes/second
+idx: 614, ln: 19922
+
+89 50 4E 47 0D 0A 1A 0A 00 00 00 0D 49 48 44 52 00 00 01 3B 00 00 01 3B 08 03 00 00 00 95 .... B6 E3 0A 04 
+Creating image.png file...
+Image Stored! [19922 Byte]
+// *************************************************************************************
+
+
+
+// *************************************************************************************
+Console output when the "png.open" is compiled and the "uint32_t net_res = Ethernet.begin(mac[0]);" is NO working:
+
+Init Display!
+
+Start WebClient_SSL on DISCO_F746NG with LAN8742A Ethernet & STM32Ethernet Library
+EthernetWebServer_SSL_STM32 v1.6.0
+Connecting... ERROR: No IP
+// *************************************************************************************
+
+
+// *************************************************************************************
+C:\Users\%username%\AppData\Local\Arduino15\packages\STM32\hardware\stm32\1.9.0\variants\DISCO_F746NG\ldscript.ld
+
+/* Highest address of the user mode stack */
+_estack = 0x20050000;    /* end of RAM */
+/* Generate a link error if heap and stack don't fit into RAM */
+_Min_Heap_Size = 0x8000;      /* required amount of heap  */
+_Min_Stack_Size = 0x4000; /* required amount of stack */
+
+/* Specify the memory areas */
+MEMORY
+{
+RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 320K
+FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 1024K
+SDRAM (rwx)    : ORIGIN = 0xC0000000, LENGTH = 8M    /* sdram, 8MB */
+}
+
+....
+
+  .sdram (NOLOAD) :
+  {
+    . = ALIGN(4);
+    _ssdram = .;
+    *(.extram .extram.*);
+    . = ALIGN(4);
+    _esdram = .;
+  } > SDRAM
+// *************************************************************************************

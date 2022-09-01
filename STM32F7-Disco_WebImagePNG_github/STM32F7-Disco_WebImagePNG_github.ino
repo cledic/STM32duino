@@ -9,13 +9,13 @@
   
   Built by Khoi Hoang https://github.com/khoih-prog/EthernetWebServer_SSL_STM32
  *****************************************************************************************************************************/
+#include <PNGdec.h>
 #include <STM32SD.h>
+
 #define SD_DETECT_PIN PC13
 
 #include "LTDC_F746_Discovery.h"
-#include <PNGdec.h>
 
-/* **** SDRAM Include and #DEFINE ************************************* */
 #include "stm32f7xx_hal_sdram.h"
 
 SDRAM_HandleTypeDef hsdram1;
@@ -33,36 +33,42 @@ SDRAM_HandleTypeDef hsdram1;
 #define SDRAM_MODEREG_OPERATING_MODE_STANDARD    ((uint16_t)0x0000)
 #define SDRAM_MODEREG_WRITEBURST_MODE_PROGRAMMED ((uint16_t)0x0000) 
 #define SDRAM_MODEREG_WRITEBURST_MODE_SINGLE     ((uint16_t)0x0200) 
-/* ******************************************************************** */
 
 int16_t w, h, xOffset=0, yOffset=0;
+PNG pngDec;
 
 LTDC_F746_Discovery tft;
 // 480x272 pixel
 #define H_RES 480
 #define V_RES   272
-__attribute__ ((section(".extram"))) uint16_t buffer2[H_RES * V_RES];
+__attribute__ ((section(".extram"))) uint16_t buffer2[480*272];
 
-File pngFile;
+File myFile;
 
 #include "defines.h"
 
 // You must have SSL Certificates here
-// https://openslab-osu.github.io/bearssl-certificate-utility/
+//#include "trust_anchors.h"
 #include "trust_anchors_ilmeteo.h"
 
+// if you don't want to use DNS (and reduce your sketch size)
+// use the numeric IP instead of the name for the server:
+// Raw IP address not accepted in SSL
+//IPAddress server_host(104, 22, 48, 75);
+
+//const char      server_host[]   = "www.arduino.cc"; // leave this alone, change only above two
 const char      server_host[]   = "www.ilmeteo.it"; // leave this alone, change only above two
 const uint16_t  server_port     = 443;
 String readHttp;
 
-PNG png;
-uint16_t usPixels[480];
-uint8_t usMask[480];
+// Choose the analog pin to get semi-random data from for SSL
+// Pick a pin that's not connected or attached to a randomish voltage source
+const int rand_pin = A5;
 
 // Initialize the SSL client library
 // Arguments: EthernetClient, our trust anchors
-EthernetClient    EthClient;
-EthernetSSLClient sslClient(EthClient, TAs, (size_t)TAs_NUM);
+EthernetClient    client;
+EthernetSSLClient sslClient(client, TAs, (size_t)TAs_NUM);
 
 // Variables to measure the speed
 unsigned long beginMicros, endMicros;
@@ -70,71 +76,30 @@ unsigned long byteCount = 0;
 
 bool printWebData = true;  // set to false for better speed measurement
 
-void *myOpen(const char *filename, int32_t *size)
-{
-  pngFile = SD.open(filename, FILE_READ);
-
-
-  if (!pngFile || pngFile.isDirectory())
-  {
-    Serial.print(F("ERROR: Failed to open "));
-    Serial.print(filename);
-    Serial.println(F(" file for reading"));
-  }
-  else
-  {
-    *size = pngFile.size();
-    Serial.printf("Opened '%s', size: %d\n", filename, *size);
-  }
-
-  return &pngFile;
-}
-
-void myClose(void *handle)
-{
-  if (pngFile)
-    pngFile.close();
-}
-
-int32_t myRead(PNGFILE *handle, uint8_t *buffer, int32_t length)
-{
-  if (!pngFile)
-    return 0;
-  Serial.printf("myRead: %d\r\n", length);
-  return pngFile.read(buffer, length);
-}
-
-int32_t mySeek(PNGFILE *handle, int32_t position)
-{
-  if (!pngFile)
-    return 0;
-  Serial.printf("mySeek: %d\r\n", position);
-  return pngFile.seek(position);
-}
+uint16_t usPixels[480];
+uint8_t usMask[480];
 
 // Function to draw pixels to the display
 void PNGDraw(PNGDRAW *pDraw)
 {
   
   // Serial.printf("Draw pos = 0,%d. size = %d x 1\n", pDraw->y, pDraw->iWidth);
-  png.getLineAsRGB565(pDraw, usPixels, PNG_RGB565_LITTLE_ENDIAN, 0x00000000);
-  png.getAlphaMask(pDraw, usMask, 1);
-  //tft.drawRGBBitmap(xOffset, yOffset + pDraw->y, usPixels, usMask, pDraw->iWidth, 1);
+  pngDec.getLineAsRGB565(pDraw, usPixels, PNG_RGB565_LITTLE_ENDIAN, 0x00000000);
+  pngDec.getAlphaMask(pDraw, usMask, 1);
   tft.drawRGBBitmap(0, pDraw->y, usPixels, usMask, pDraw->iWidth, 1);
 
-  Serial.printf("PNGDraw: iWidth: %d\r\n", pDraw->iWidth);
+  //Serial.printf("PNGDraw: iWidth: %d\r\n", pDraw->iWidth);
 }
 
 void setup()
 {
-  /* Configure external SDRAM */
   SDRAM();
   
   // Open serial communications and wait for port to open:
   Serial.begin(115200);
   while (!Serial && millis() < 5000);
 
-  Serial.println("Init Display!");Serial.flush();
+  Serial.println(F("Init Display!"));Serial.flush();
 
   tft.begin((uint16_t *)buffer2);
   tft.fillScreen( LTDC_BLACK );
@@ -152,23 +117,15 @@ void setup()
   
   Serial.println(ETHERNET_WEBSERVER_SSL_STM32_VERSION);
 
-  Serial.print("Connecting... ");
+  Serial.print(F("Connecting... "));
   // start the ethernet connection and the server:
   // Use DHCP dynamic IP and random mac
-  // uint16_t index = millis() % NUMBER_OF_MAC;
-#if 0
+  uint16_t index = millis() % NUMBER_OF_MAC;
   // Use Static IP
-  Ethernet.begin(mac[0], ip, dns, gw);
-#else  
-  uint32_t net_res = Ethernet.begin(mac[0]);
-  if ( !net_res)
-  {
-    Serial.println("ERROR: No IP\r\n");
-    while(1);
-  }
-#endif
+  //Ethernet.begin(mac[index], ip);
+  Ethernet.begin(mac[index]);
 
-  Serial.print("Connected! IP address: ");
+  Serial.print(F("Connected! IP address: "));
   Serial.println(Ethernet.localIP());
 
   // give the Ethernet shield a second to initialize:
@@ -189,7 +146,7 @@ void setup()
     Serial.print("Connected to ");
 
 #if ( USE_ETHERNET || USE_ETHERNET_LARGE || USE_ETHERNET_ENC || USE_UIP_ETHERNET )
-    Serial.println(EthClient.remoteIP());  
+    Serial.println(client.remoteIP());  
 #else    
     Serial.println(server_host); 
 #endif
@@ -209,13 +166,12 @@ void setup()
   else
   {
     // if you didn't get a connection to the server:
-    Serial.println("Connection failed!");
-    while(1);
+    Serial.println("Connection failed");
   }
 
   beginMicros = micros();
 
-  Serial.print(F("Initializing SD card..."));
+  Serial.print("Initializing SD card...");
 
   while (!SD.begin(SD_DETECT_PIN))
   {
@@ -257,53 +213,44 @@ void loop()
     Serial.print(" kbytes/second");
     Serial.println();
 
-
     int idx = readHttp.indexOf("\r\n\r\n")+4;
     int ln = readHttp.length()-idx;
-
-    Serial.printf("idx: %d, ln: %d\r\n", idx, ln);
+    int tlen = readHttp.length();
+    Serial.printf("idx: %d, ln: %d, len: %d\r\n", idx, ln, tlen );
     
-    const char *img = readHttp.c_str();
+    uint8_t*img = (uint8_t*)malloc(ln);
+    if ( img == (uint8_t*)NULL)
+    {
+      Serial.println("ERROR: malloc Failed!");
+      while(1);
+    }
+    const char *img2 = readHttp.c_str();
+    //readHttp.toCharArray((char*)img, ln);
 
-    /*
-     * I send the HEX stream received to the console and use this site to save it as a file:
-     * https://tomeko.net/online_tools/hex_to_file.php?lang=en
-     * 
-     * The file saved is a good .PNG file, as expected.
-     */         
+    for( int u=0; u<ln; u++)
+    {
+      img[u] = img2[u+idx];
+    }
+
+#if 0    
     Serial.printf("\n");
     for( int i=0; i<ln; i++)
     {
-      Serial.printf("%02X ", img[i+idx]);
+      Serial.printf("%02X ", img[i]);
     }
     Serial.printf("\n");
-
-    /* I saved the .PNG image on SDCard to try using the "png.open" command */
-    Serial.println("Creating image.png file...");
-    pngFile = SD.open("image.png", FILE_WRITE);
-    uint32_t byteswritten = pngFile.write(img, ln);
-    pngFile.close();
-    if ( byteswritten != ln)
+#endif
+    int rc = pngDec.openRAM((uint8_t *)img, ln, PNGDraw);
+    
+    if (rc == PNG_SUCCESS) 
     {
-      Serial.println("ERROR: myFile.write!\r\n");
-      while(1);
+      Serial.printf("image specs: (%d x %d), %d bpp, pixel type: %d\n", pngDec.getWidth(), pngDec.getHeight(), pngDec.getBpp(), pngDec.getPixelType());
+      rc = pngDec.decode(NULL, 0); // no private structure and skip CRC checking
+      pngDec.close();
     } else {
-      Serial.printf("Image Stored! [%d Byte]\r\n", byteswritten);
+      Serial.print("ERROR: pngDec.openRAM ");
+      Serial.println(rc);
     }
-
-    /*
-     * If I enable the code below, the Ethernet client will stop to work.
-     * The board is no mode capable to take an IP using the DHCP even to use a static IP
-     * I tried both method: "png.open" and "png.openRAM" but with the same result.
-     */
-#if 0
-    int rc = png.open("image.png", myOpen, myClose, myRead, mySeek, PNGDraw);
-    if (rc == PNG_SUCCESS)
-    {          
-      rc = png.decode(NULL, 0);      
-      png.close();
-    }
-#endif    
     
     // do nothing forevermore:
     while (true)
@@ -312,10 +259,7 @@ void loop()
     }
   }
 }
-
-/* **** Code to activate externa SDRAM ******************************* */
-void HAL_SDRAM_MspInit(SDRAM_HandleTypeDef *hsdram) 
-{
+void HAL_SDRAM_MspInit(SDRAM_HandleTypeDef *hsdram) {
   GPIO_InitTypeDef gpio_init_structure;
   /* Enable FMC clock */
   __HAL_RCC_FMC_CLK_ENABLE();
@@ -447,4 +391,3 @@ void BSP_SDRAM_Initialization_sequence(uint32_t RefreshCount)
   /* Set the device refresh rate */
   HAL_SDRAM_ProgramRefreshRate(&hsdram1, RefreshCount); 
 }
-/* ******************************************************************* */
